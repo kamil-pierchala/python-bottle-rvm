@@ -15,7 +15,7 @@ from pypdf import PdfReader
 import requests
 from tkintermapview import TkinterMapView
 
-# Ustawienia motywu graficznego
+# Theme settings
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
@@ -23,7 +23,7 @@ VEHICLES_FILE = "vehicles.json"
 
 
 class VehicleManagerWindow(ctk.CTkToplevel):
-    """Osobne okienko do zarządzania flotą pojazdów (Dodaj / Edytuj / Usuń)"""
+    """Separate window for vehicle fleet management (Add / Edit / Delete)"""
 
     def __init__(self, parent_app):
         super().__init__(parent_app)
@@ -37,7 +37,7 @@ class VehicleManagerWindow(ctk.CTkToplevel):
         self.grid_rowconfigure(1, weight=1)
         self.grid_rowconfigure(2, weight=0)
 
-        # Nagłówek
+        # Header
         lbl_title = ctk.CTkLabel(
             self,
             text="Baza pojazdów i kierowców",
@@ -45,11 +45,11 @@ class VehicleManagerWindow(ctk.CTkToplevel):
         )
         lbl_title.grid(row=0, column=0, padx=15, pady=(15, 5))
 
-        # Lista pojazdów (Scrollable)
+        # Vehicle list (Scrollable)
         self.scroll_frame = ctk.CTkScrollableFrame(self)
         self.scroll_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=5)
 
-        # Formularz dodawania / edycji
+        # Add / edit form
         self.form_frame = ctk.CTkFrame(self)
         self.form_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(5, 15))
         self.form_frame.grid_columnconfigure(1, weight=1)
@@ -76,7 +76,7 @@ class VehicleManagerWindow(ctk.CTkToplevel):
         self.entry_cap = ctk.CTkEntry(self.form_frame, placeholder_text="24")
         self.entry_cap.grid(row=2, column=1, padx=8, pady=5, sticky="ew")
 
-        # Przycisk Zapisz/Dodaj
+        # Save/Add button
         self.btn_save = ctk.CTkButton(
             self.form_frame,
             text="Dodaj nowy pojazd",
@@ -202,22 +202,22 @@ class RoutePlannerApp(ctk.CTk):
         self.vehicles = {}
         self.load_vehicles_from_file()
 
-        self.start_point = None  # Baza
-        self.dropoff_points = []  # Lista dostępnych stref zrzutu
-        self.loaded_points = []  # Automaty (punkty odbioru)
-        self.ordered_points_list = []  # Posortowane punkty po optymalizacji
-        self.current_selected_vehicle_str = "-- Wybierz pojazd --"  # Domyślny placeholder
+        self.start_point = None  # Base / Depot
+        self.dropoff_points = []  # List of available dropoff zones
+        self.loaded_points = []  # Reverse vending machines (pickup points)
+        self.ordered_points_list = []  # Sorted points after optimization
+        self.current_selected_vehicle_str = "-- Wybierz pojazd --"  # Default placeholder
 
         self.start_marker = None
         self.current_paths = []
         self.gmaps_url = None
         self.geolocator = ArcGIS(user_agent="bottle_route_planner")
 
-        # Layout (1 wiersz, 2 kolumny)
+        # Layout (1 row, 2 columns)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
 
-        # ------------------- PANEL BOCZNY -------------------
+        # Sidebar
         self.sidebar_frame = ctk.CTkFrame(self, width=400, corner_radius=0)
         self.sidebar_frame.grid(
             row=0, column=0, sticky="nsew", padx=10, pady=10
@@ -230,7 +230,7 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.logo_label.pack(padx=15, pady=(15, 10))
 
-        # SEKCJA 0: WYBÓR POJAZDU Z BAZY
+        # Vehicle selection from database
         self.vehicle_section_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="Pojazd i kierowca:",
@@ -258,7 +258,7 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.btn_manage_vehicles.pack(side="right")
 
-        # SEKCJA 1: NAZWA TRASY
+        # Route name
         self.route_name_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="1. Nazwa trasy (opcjonalnie):",
@@ -272,7 +272,7 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.route_name_entry.pack(padx=15, pady=(2, 6), fill="x")
 
-        # SEKCJA 2: BAZA (START)
+        # Base/depot
         self.start_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="2. Punkt startowy (baza):",
@@ -295,7 +295,7 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.btn_set_start.pack(padx=15, pady=(2, 6))
 
-        # SEKCJA 3: STREFY ZRZUTU
+        # Dropoff zones
         self.dropoff_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="3. Strefy zrzutu (można dodać kilka):",
@@ -327,7 +327,7 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.dropoff_list_label.pack(padx=15, pady=(0, 6))
 
-        # SEKCJA 4: POJEMNOŚĆ I CZAS
+        # Capacity and time
         self.param_frame = ctk.CTkFrame(
             self.sidebar_frame, fg_color="transparent"
         )
@@ -372,7 +372,7 @@ class RoutePlannerApp(ctk.CTk):
         self.stop_time_entry.insert(0, "15")
         self.stop_time_entry.grid(row=1, column=2, sticky="w")
 
-        # SEKCJA 5: PLIK (ZLECENIA PDF / EXCEL)
+        # Order files (pdf/xlsx/csv)
         self.file_label = ctk.CTkLabel(
             self.sidebar_frame,
             text="5. Wgraj pliki zleceń (.pdf / .xlsx / .csv):",
@@ -387,13 +387,13 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.btn_load_excel.pack(padx=15, pady=2, fill="x")
 
-        # SEKCJA 6: PODGLĄD I EDYCJA WORKÓW
+        # Bag preview and editing
         self.points_edit_frame = ctk.CTkScrollableFrame(
             self.sidebar_frame, height=140, label_text="Liczba worków na sklepach | 240L | 1000L | Inne |:"
         )
         self.points_edit_frame.pack(padx=15, pady=(4, 4), fill="x")
 
-        # SEKCJA 7: AKCJE
+        # Actions
         self.btn_generate = ctk.CTkButton(
             self.sidebar_frame,
             text="Generuj optymalną trasę",
@@ -432,7 +432,7 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.status_label.pack(padx=15, pady=(4, 2))
 
-        # SEKCJA 8: LISTA KROK PO KROKU
+        # Step by step list
         self.route_textbox = ctk.CTkTextbox(
             self.sidebar_frame, height=120, corner_radius=5
         )
@@ -440,19 +440,19 @@ class RoutePlannerApp(ctk.CTk):
         self.route_textbox.insert("1.0", "Brak wyznaczonej trasy.")
         self.route_textbox.configure(state="disabled")
 
-        # ------------------- WIDOK MAPY (CHORZÓW) -------------------
+        # Map view
         self.map_frame = ctk.CTkFrame(self)
         self.map_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
         self.map_widget = TkinterMapView(self.map_frame, corner_radius=10)
         self.map_widget.pack(fill="both", expand=True)
 
-        self.map_widget.set_position(50.2976, 18.9542)  # Pozycja Chorzów
+        self.map_widget.set_position(50.2976, 18.9542)  # Position Chorzów
         self.map_widget.set_zoom(13)
 
         self.update_vehicle_dropdown()
 
-    # --- OBSŁUGA BAZY POJAZDÓW JSON ---
+    # Vehicle JSON database handling
     def load_vehicles_from_file(self):
         if os.path.exists(VEHICLES_FILE):
             try:
@@ -487,7 +487,7 @@ class RoutePlannerApp(ctk.CTk):
         values = [placeholder] + [f"{v['name']} ({v['driver']})" for v in self.vehicles.values()]
         self.vehicle_option_menu.configure(values=values)
 
-        # Jeśli poprzednio coś wybrano, spróbuj to zachować, inaczej ustaw placeholder
+        # If something was selected previously, try to keep it, otherwise set placeholder
         if self.current_selected_vehicle_str in values:
             self.vehicle_option_menu.set(self.current_selected_vehicle_str)
         else:
@@ -500,8 +500,8 @@ class RoutePlannerApp(ctk.CTk):
         if self.current_selected_vehicle_str == selected_str:
             return
 
-        # Pytamy o potwierdzenie TYLKO wtedy, gdy użytkownik faktycznie zmieniał już konkretny pojazd na inny
-        # (czyli z wybranego pojazdu przełącza na inny i ma załadowaną trasę/punkty)
+        # Ask for confirmation ONLY if the user is actually changing from a specific vehicle to another
+        # (i.e. switching from a selected vehicle to a different one while having a route/points loaded)
         if (self.loaded_points or self.ordered_points_list) and self.current_selected_vehicle_str != placeholder:
             confirm = messagebox.askyesno(
                 "Zmiana pojazdu",
@@ -519,7 +519,7 @@ class RoutePlannerApp(ctk.CTk):
         self.current_selected_vehicle_str = selected_str
 
         if selected_str == placeholder:
-            # Gdy użytkownik kliknie powrotnie "Wybierz pojazd..."
+            # When user clicks back to "Choose vehicle"
             self.capacity_entry.delete(0, "end")
             self.capacity_entry.insert(0, "20")
             self.route_name_entry.delete(0, "end")
@@ -540,7 +540,7 @@ class RoutePlannerApp(ctk.CTk):
     def open_vehicle_manager(self):
         VehicleManagerWindow(self)
 
-    # --- POZOSTAŁA LOGIKA APLIKACJI ---
+    # Remaining application logic
     def update_status(self, text, color="white"):
         self.after(
             0, lambda: self.status_label.configure(text=text, text_color=color)
