@@ -53,7 +53,7 @@ The system solves a variant of the **Capacitated Vehicle Routing Problem with Mu
    ```bash
    git clone https://github.com/kamil-pierchala/python-bottle-rvm.git
    cd python-bottle-rvm
-   
+   ```
 2. Create and activate a virtual environment:
     ```
     python -m venv .venv
@@ -62,11 +62,10 @@ The system solves a variant of the **Capacitated Vehicle Routing Problem with Mu
     .venv\Scripts\activate
     # On macOS/Linux:
     source .venv/bin/activate
-   
+   ```
 3. Install required dependencies:
     ```
     pip install customtkinter tkintermapview geopy pandas pypdf requests openpyxl
-    
     ```
 
 ## Running the Application
