@@ -21,6 +21,7 @@ ctk.set_default_color_theme("blue")
 
 VEHICLES_FILE = "vehicles.json"
 DROPOFFS_FILE = "dropoffs.json"
+GEO_CACHE_FILE = "address_cache.json"
 
 # Polish/English translation dictionary
 TRANSLATIONS = {
@@ -373,8 +374,13 @@ class DropoffManagerWindow(ctk.CTkToplevel):
         cleaned_addr = self.parent_app.clean_address(addr)
         lat, lon = None, None
 
+        # Check local geocoding cache first
+        cached = self.parent_app.geo_cache.get(cleaned_addr)
+        if cached:
+            lat, lon = cached[0], cached[1]
+
         # If editing and the address hasn't changed, keep the coordinates
-        if self.selected_dropoff_id:
+        if (lat is None or lon is None) and self.selected_dropoff_id:
             old = self.parent_app.saved_dropoffs.get(self.selected_dropoff_id, {})
             if old.get("address") == addr and "lat" in old and "lon" in old:
                 lat, lon = old["lat"], old["lon"]
@@ -384,6 +390,8 @@ class DropoffManagerWindow(ctk.CTkToplevel):
                 loc = self.parent_app.geolocator.geocode(f"{cleaned_addr}, Polska", timeout=10)
                 if loc:
                     lat, lon = loc.latitude, loc.longitude
+                    self.parent_app.geo_cache[cleaned_addr] = [lat, lon]
+                    self.parent_app.save_geo_cache()
             except Exception:
                 pass
 
@@ -607,6 +615,9 @@ class RoutePlannerApp(ctk.CTk):
 
         self.saved_dropoffs = {}
         self.load_dropoffs_from_file()
+
+        self.geo_cache = {}
+        self.load_geo_cache()
 
         self.start_point = None  # Base / Depot
         self.dropoff_points = []  # List of chosen dropoff zones for current route
@@ -1137,6 +1148,24 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.update_status(t["status_dropoff_added"], "cyan")
 
+    # Geocoding local cache
+    def load_geo_cache(self):
+        if os.path.exists(GEO_CACHE_FILE):
+            try:
+                with open(GEO_CACHE_FILE, "r", encoding="utf-8") as f:
+                    self.geo_cache = json.load(f)
+            except Exception:
+                self.geo_cache = {}
+        else:
+            self.geo_cache = {}
+
+    def save_geo_cache(self):
+        try:
+            with open(GEO_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.geo_cache, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
     # General logic
     def update_status(self, text, color="white"):
         self.after(
@@ -1205,34 +1234,45 @@ class RoutePlannerApp(ctk.CTk):
         cleaned_addr = self.clean_address(raw_addr)
         self.update_status(t["status_search_base"], "yellow")
 
-        try:
-            location = self.geolocator.geocode(f"{cleaned_addr}, Polska", timeout=10)
-            if location:
-                self.start_point = {
-                    "name": f"{raw_addr}",
-                    "lat": location.latitude,
-                    "lon": location.longitude,
-                    "bags": 0,
-                }
+        lat, lon = None, None
+        cached = self.geo_cache.get(cleaned_addr)
+        if cached:
+            lat, lon = cached[0], cached[1]
+        else:
+            try:
+                location = self.geolocator.geocode(f"{cleaned_addr}, Polska", timeout=10)
+                if location:
+                    lat, lon = location.latitude, location.longitude
+                    self.geo_cache[cleaned_addr] = [lat, lon]
+                    self.save_geo_cache()
+            except Exception as e:
+                self.update_status(f"{t['status_base_err']} {str(e)}", "red")
+                return
 
-                def draw_start_marker():
-                    if self.start_marker:
-                        self.map_widget.delete(self.start_marker)
-                    self.start_marker = self.map_widget.set_marker(
-                        self.start_point["lat"],
-                        self.start_point["lon"],
-                        text=f"{t['base_tag']}: {self.start_point['name']}",
-                    )
-                    self.map_widget.set_position(
-                        self.start_point["lat"], self.start_point["lon"]
-                    )
+        if lat is not None and lon is not None:
+            self.start_point = {
+                "name": f"{raw_addr}",
+                "lat": lat,
+                "lon": lon,
+                "bags": 0,
+            }
 
-                self.after(0, draw_start_marker)
-                self.update_status(t["status_base_set"], "cyan")
-            else:
-                self.update_status(t["status_base_not_found"], "red")
-        except Exception as e:
-            self.update_status(f"{t['status_base_err']} {str(e)}", "red")
+            def draw_start_marker():
+                if self.start_marker:
+                    self.map_widget.delete(self.start_marker)
+                self.start_marker = self.map_widget.set_marker(
+                    self.start_point["lat"],
+                    self.start_point["lon"],
+                    text=f"{t['base_tag']}: {self.start_point['name']}",
+                )
+                self.map_widget.set_position(
+                    self.start_point["lat"], self.start_point["lon"]
+                )
+
+            self.after(0, draw_start_marker)
+            self.update_status(t["status_base_set"], "cyan")
+        else:
+            self.update_status(t["status_base_not_found"], "red")
 
     def add_dropoff_point(self):
         t = TRANSLATIONS[self.current_lang]
@@ -1250,36 +1290,47 @@ class RoutePlannerApp(ctk.CTk):
         cleaned_addr = self.clean_address(raw_addr)
         self.update_status(t["status_search_dropoff"], "yellow")
 
-        try:
-            location = self.geolocator.geocode(f"{cleaned_addr}, Polska", timeout=10)
-            if location:
-                drop_pt = {
-                    "name": f"{raw_addr}",
-                    "lat": location.latitude,
-                    "lon": location.longitude,
-                    "bags": 0,
-                }
-                self.dropoff_points.append(drop_pt)
+        lat, lon = None, None
+        cached = self.geo_cache.get(cleaned_addr)
+        if cached:
+            lat, lon = cached[0], cached[1]
+        else:
+            try:
+                location = self.geolocator.geocode(f"{cleaned_addr}, Polska", timeout=10)
+                if location:
+                    lat, lon = location.latitude, location.longitude
+                    self.geo_cache[cleaned_addr] = [lat, lon]
+                    self.save_geo_cache()
+            except Exception as e:
+                self.update_status(f"{t['status_dropoff_err']} {str(e)}", "red")
+                return
 
-                def update_dropoff_ui():
-                    self.map_widget.set_marker(
-                        drop_pt["lat"],
-                        drop_pt["lon"],
-                        text=f"{t['dropoff_tag']}: {drop_pt['name']}",
-                    )
-                    names = [d["name"] for d in self.dropoff_points]
-                    self.dropoff_list_label.configure(
-                        text=f"{t['dropoffs_added']} ({len(names)}):\n" + ", ".join(names),
-                        text_color="cyan",
-                    )
-                    self.dropoff_entry.delete(0, "end")
+        if lat is not None and lon is not None:
+            drop_pt = {
+                "name": f"{raw_addr}",
+                "lat": lat,
+                "lon": lon,
+                "bags": 0,
+            }
+            self.dropoff_points.append(drop_pt)
 
-                self.after(0, update_dropoff_ui)
-                self.update_status(t["status_dropoff_added"], "cyan")
-            else:
-                self.update_status(t["status_dropoff_not_found"], "red")
-        except Exception as e:
-            self.update_status(f"{t['status_dropoff_err']} {str(e)}", "red")
+            def update_dropoff_ui():
+                self.map_widget.set_marker(
+                    drop_pt["lat"],
+                    drop_pt["lon"],
+                    text=f"{t['dropoff_tag']}: {drop_pt['name']}",
+                )
+                names = [d["name"] for d in self.dropoff_points]
+                self.dropoff_list_label.configure(
+                    text=f"{t['dropoffs_added']} ({len(names)}):\n" + ", ".join(names),
+                    text_color="cyan",
+                )
+                self.dropoff_entry.delete(0, "end")
+
+            self.after(0, update_dropoff_ui)
+            self.update_status(t["status_dropoff_added"], "cyan")
+        else:
+            self.update_status(t["status_dropoff_not_found"], "red")
 
     def parse_pdf_file(self, pdf_path):
         reader = PdfReader(pdf_path)
@@ -1393,13 +1444,23 @@ class RoutePlannerApp(ctk.CTk):
 
                     try:
                         clean_q = self.clean_address(search_addr)
-                        location = self.geolocator.geocode(f"{clean_q}, Polska", timeout=10)
+                        lat, lon = None, None
 
-                        if location:
+                        cached = self.geo_cache.get(clean_q)
+                        if cached:
+                            lat, lon = cached[0], cached[1]
+                        else:
+                            location = self.geolocator.geocode(f"{clean_q}, Polska", timeout=10)
+                            if location:
+                                lat, lon = location.latitude, location.longitude
+                                self.geo_cache[clean_q] = [lat, lon]
+                                self.save_geo_cache()
+
+                        if lat is not None and lon is not None:
                             new_points.append({
                                 "name": name,
-                                "lat": location.latitude,
-                                "lon": location.longitude,
+                                "lat": lat,
+                                "lon": lon,
                                 "w240": pdf_data["w240"],
                                 "w1000": pdf_data["w1000"],
                                 "w_other": pdf_data["w_other"],
@@ -1431,11 +1492,19 @@ class RoutePlannerApp(ctk.CTk):
                             lat, lon = float(row["Szerokosc"]), float(row["Dlugosc"])
                         else:
                             clean_a = self.clean_address(str(row["Adres"]))
-                            location = self.geolocator.geocode(f"{clean_a}, Polska", timeout=10)
-                            if location:
-                                lat, lon = location.latitude, location.longitude
+                            lat, lon = None, None
+
+                            cached = self.geo_cache.get(clean_a)
+                            if cached:
+                                lat, lon = cached[0], cached[1]
                             else:
-                                continue
+                                location = self.geolocator.geocode(f"{clean_a}, Polska", timeout=10)
+                                if location:
+                                    lat, lon = location.latitude, location.longitude
+                                    self.geo_cache[clean_a] = [lat, lon]
+                                    self.save_geo_cache()
+                                else:
+                                    continue
 
                         new_points.append({
                             "name": name,
