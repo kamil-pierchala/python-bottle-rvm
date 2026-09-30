@@ -49,7 +49,8 @@ TRANSLATIONS = {
         "btn_load": "Wgraj zlecenia (PDF / Excel)",
         "bags_frame_title": "Liczba worków na sklepach | 240L | 1000L | Inne |:",
         "generate_route": "Generuj optymalną trasę",
-        "open_gmaps": "Otwórz w Google Maps",
+        "open_gmaps": "Otwórz pełną trasę w Google Maps",
+        "open_trip_gmaps": "Otwórz kurs #{idx} w Google Maps",
         "export_txt": "Zapisz plan trasy (.txt)",
         "status_ready": "Status: Ustaw punkty lub wgraj pliki...",
         "no_route": "Brak wyznaczonej trasy.",
@@ -61,6 +62,7 @@ TRANSLATIONS = {
         "filetype_orders": "Pliki zleceń (.pdf, .xlsx, .csv)",
         "txt_plan_header": "PLAN TRASY",
         "txt_gmaps_link": "Link do Google Maps:",
+        "txt_trip_gmaps_link": "Google Maps (Kurs #{idx}):",
         "alert_change_veh_title": "Zmiana pojazdu",
         "alert_change_veh_msg": "Wyznaczenie trasy dotyczy innego pojazdu.\nCzy na pewno chcesz zmienić pojazd i zresetować obecną trasę?",
         "status_enter_base": "Wpisz adres bazy!",
@@ -152,7 +154,8 @@ TRANSLATIONS = {
         "btn_load": "Load Orders (PDF / Excel)",
         "bags_frame_title": "Bag counts per store | 240L | 1000L | Other |:",
         "generate_route": "Generate Optimal Route",
-        "open_gmaps": "Open in Google Maps",
+        "open_gmaps": "Open full route in Google Maps",
+        "open_trip_gmaps": "Open Trip #{idx} in Google Maps",
         "export_txt": "Export Route Plan (.txt)",
         "status_ready": "Status: Set points or load files...",
         "no_route": "No route generated.",
@@ -164,6 +167,7 @@ TRANSLATIONS = {
         "filetype_orders": "Order files (.pdf, .xlsx, .csv)",
         "txt_plan_header": "ROUTE PLAN",
         "txt_gmaps_link": "Google Maps Link:",
+        "txt_trip_gmaps_link": "Google Maps (Trip #{idx}):",
         "alert_change_veh_title": "Change vehicle",
         "alert_change_veh_msg": "Route is planned for another vehicle.\nAre you sure you want to change vehicle and reset current route?",
         "status_enter_base": "Enter depot address!",
@@ -312,7 +316,7 @@ class DropoffManagerWindow(ctk.CTkToplevel):
             card = ctk.CTkFrame(self.scroll_frame)
             card.pack(fill="x", pady=4, padx=5)
 
-            info_text = f"{d_data['name']}\n📍 {t['dropoff_addr']}: {d_data['address']}"
+            info_text = f"{d_data['name']}\n{t['dropoff_addr']}: {d_data['address']}"
             lbl = ctk.CTkLabel(
                 card, text=info_text, justify="left", font=ctk.CTkFont(size=12)
             )
@@ -361,7 +365,7 @@ class DropoffManagerWindow(ctk.CTkToplevel):
         if not name or not addr:
             return
 
-        self.btn_save.configure(state="disabled", text="Geokodowanie...")
+        self.btn_save.configure(state="disabled", text="Geocoding...")
         threading.Thread(target=self._process_save_dropoff, args=(name, addr), daemon=True).start()
 
     def _process_save_dropoff(self, name, addr):
@@ -613,6 +617,7 @@ class RoutePlannerApp(ctk.CTk):
         self.start_marker = None
         self.current_paths = []
         self.gmaps_url = None
+        self.trip_gmaps_urls = []  # Separate navigation links per trip
         self.geolocator = ArcGIS(user_agent="bottle_route_planner")
 
         # Layout (1 row, 2 columns)
@@ -853,6 +858,12 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.btn_open_gmaps.pack(padx=15, pady=2, fill="x")
 
+        # Trip navigation links frame (Scrollable container for separate trips)
+        self.trip_links_frame = ctk.CTkScrollableFrame(
+            self.sidebar_frame, height=80, label_text=""
+        )
+        self.trip_links_frame.pack(padx=15, pady=2, fill="x")
+
         self.btn_export = ctk.CTkButton(
             self.sidebar_frame,
             text=TRANSLATIONS["pl"]["export_txt"],
@@ -918,6 +929,10 @@ class RoutePlannerApp(ctk.CTk):
         self.btn_generate.configure(text=t["generate_route"])
         self.btn_open_gmaps.configure(text=t["open_gmaps"])
         self.btn_export.configure(text=t["export_txt"])
+
+        # Re-render trip buttons with updated language
+        if self.trip_gmaps_urls:
+            self.render_trip_buttons()
 
         if not self.ordered_points_list:
             self.update_status(t["status_ready"], "gray")
@@ -1090,14 +1105,14 @@ class RoutePlannerApp(ctk.CTk):
             card = ctk.CTkFrame(scroll)
             card.pack(fill="x", pady=3, padx=2)
 
-            info = f"{d_data['name']}\n📍 {d_data['address']}"
+            info = f"{d_data['name']}\n{d_data['address']}"
             ctk.CTkLabel(card, text=info, justify="left", font=ctk.CTkFont(size=12)).pack(side="left", padx=8, pady=5)
 
             def add_and_close(saved_pt=d_data):
                 self.add_dropoff_point_direct(saved_pt["name"], saved_pt["address"], saved_pt["lat"], saved_pt["lon"])
                 picker_win.destroy()
 
-            btn = ctk.CTkButton(card, text="➕", width=40, fg_color="green", hover_color="darkgreen", command=add_and_close)
+            btn = ctk.CTkButton(card, text="+", width=40, fg_color="green", hover_color="darkgreen", command=add_and_close)
             btn.pack(side="right", padx=5)
 
     def add_dropoff_point_direct(self, name, address, lat, lon):
@@ -1506,8 +1521,13 @@ class RoutePlannerApp(ctk.CTk):
         for widget in self.points_edit_frame.winfo_children():
             widget.destroy()
 
+        for widget in self.trip_links_frame.winfo_children():
+            widget.destroy()
+
         self.loaded_points.clear()
         self.ordered_points_list.clear()
+        self.trip_gmaps_urls.clear()
+        self.gmaps_url = None
         self.btn_open_gmaps.configure(state="disabled")
         self.btn_export.configure(state="disabled")
 
@@ -1536,6 +1556,22 @@ class RoutePlannerApp(ctk.CTk):
 
         self.sync_bags_from_gui()
         threading.Thread(target=self.calculate_osrm_multi_trip, daemon=True).start()
+
+    def render_trip_buttons(self):
+        t = TRANSLATIONS[self.current_lang]
+        for widget in self.trip_links_frame.winfo_children():
+            widget.destroy()
+
+        for idx, url in enumerate(self.trip_gmaps_urls, 1):
+            btn = ctk.CTkButton(
+                self.trip_links_frame,
+                text=t["open_trip_gmaps"].format(idx=idx),
+                fg_color="#0284C7",
+                hover_color="#0369A1",
+                height=28,
+                command=lambda u=url: webbrowser.open(u),
+            )
+            btn.pack(fill="x", pady=2, padx=2)
 
     def calculate_osrm_multi_trip(self):
         t = TRANSLATIONS[self.current_lang]
@@ -1603,6 +1639,7 @@ class RoutePlannerApp(ctk.CTk):
 
             full_route_geometry = []
             full_ordered_coords_gmaps = []
+            trip_urls = []
             total_distance_km = 0
             total_driving_duration_min = 0
             total_service_duration_min = 0
@@ -1646,9 +1683,11 @@ class RoutePlannerApp(ctk.CTk):
                 self.ordered_points_list.append(
                     f"{t['rep_start']} {t['rep_trip']} #{trip_idx} [{trip_start_str}]: {current_start_node['name']}")
 
+                trip_coords_gmaps = [f"{current_start_node['lat']},{current_start_node['lon']}"]
                 full_ordered_coords_gmaps.append(f"{current_start_node['lat']},{current_start_node['lon']}")
 
                 for pt_idx, pt in enumerate(trip_points):
+                    trip_coords_gmaps.append(f"{pt['lat']},{pt['lon']}")
                     full_ordered_coords_gmaps.append(f"{pt['lat']},{pt['lon']}")
 
                     if pt_idx < len(legs):
@@ -1677,11 +1716,14 @@ class RoutePlannerApp(ctk.CTk):
 
                 dropoff_arrival_str = current_time.strftime("%H:%M")
 
+                trip_coords_gmaps.append(f"{chosen_dropoff['lat']},{chosen_dropoff['lon']}")
                 full_ordered_coords_gmaps.append(f"{chosen_dropoff['lat']},{chosen_dropoff['lon']}")
                 dropoff_line = f"---> {t['rep_drop']} [{dropoff_arrival_str}]: {chosen_dropoff['name']} {t['rep_unloading']}\n\n"
                 list_text += dropoff_line
                 self.ordered_points_list.append(
                     f"{t['rep_drop']} #{trip_idx} [{dropoff_arrival_str}]: {chosen_dropoff['name']}")
+
+                trip_urls.append(f"https://www.google.com/maps/dir/{'/'.join(trip_coords_gmaps)}")
 
                 current_time += timedelta(minutes=10)
                 total_service_duration_min += 10
@@ -1726,6 +1768,9 @@ class RoutePlannerApp(ctk.CTk):
                     self.current_paths.append(p)
 
                 self.gmaps_url = f"https://www.google.com/maps/dir/{'/'.join(full_ordered_coords_gmaps)}"
+                self.trip_gmaps_urls = trip_urls
+                self.render_trip_buttons()
+
                 self.btn_open_gmaps.configure(state="normal")
                 self.btn_export.configure(state="normal")
 
@@ -1774,6 +1819,12 @@ class RoutePlannerApp(ctk.CTk):
                     f.write("========================\n\n")
                     for line in self.ordered_points_list:
                         f.write(f"{line}\n")
+
+                    if self.trip_gmaps_urls:
+                        f.write("\n------------------------\n")
+                        for idx, url in enumerate(self.trip_gmaps_urls, 1):
+                            f.write(f"\n{t['txt_trip_gmaps_link'].format(idx=idx)}\n{url}\n")
+
                     if self.gmaps_url:
                         f.write(
                             f"\n{t['txt_gmaps_link']}\n{self.gmaps_url}\n"
