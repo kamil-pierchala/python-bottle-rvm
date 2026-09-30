@@ -20,6 +20,7 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
 VEHICLES_FILE = "vehicles.json"
+DROPOFFS_FILE = "dropoffs.json"
 
 # Polish/English translation dictionary
 TRANSLATIONS = {
@@ -36,7 +37,9 @@ TRANSLATIONS = {
         "set_start": "Ustaw bazę",
         "dropoff_points": "3. Strefy zrzutu (można dodać kilka):",
         "dropoff_placeholder": "np. ul. Katowicka 5, Chorzów",
-        "add_dropoff": "Dodaj strefę zrzutu",
+        "add_dropoff": "Dodaj zrzut",
+        "dropoffs_mgr_btn": "Baza",
+        "dropoffs_add_from_db": "Dodaj z bazy",
         "dropoffs_none": "Dodane zrzuty: Brak",
         "dropoffs_added": "Dodane zrzuty",
         "max_capacity": "Max worków\n(240L):",
@@ -114,6 +117,15 @@ TRANSLATIONS = {
         "fleet_lbl_cap": "Pojemność (worki 240L):",
         "fleet_btn_add": "Dodaj nowy pojazd",
         "fleet_btn_save_changes": "Zapisz zmiany w pojeździe",
+        "dropoff_win_title": "Baza stref zrzutu (magazynów)",
+        "dropoff_header": "Zapisane strefy zrzutu",
+        "dropoff_empty": "Brak zapisanych stref zrzutu. Dodaj pierwszą poniżej.",
+        "dropoff_lbl_name": "Nazwa magazynu:",
+        "dropoff_lbl_addr": "Dokładny adres:",
+        "dropoff_btn_add": "Dodaj nowy magazyn",
+        "dropoff_btn_save_changes": "Zapisz zmiany",
+        "dropoff_addr": "Adres",
+        "dropoff_select_title": "Wybierz strefę z bazy",
     },
     "en": {
         "app_title": "Route Optimizer - Bottle Return VRP",
@@ -128,7 +140,9 @@ TRANSLATIONS = {
         "set_start": "Set Depot",
         "dropoff_points": "3. Disposal Points (multiple allowed):",
         "dropoff_placeholder": "e.g. 5 Central Road, City",
-        "add_dropoff": "Add Disposal Site",
+        "add_dropoff": "Add Dropoff",
+        "dropoffs_mgr_btn": "DB",
+        "dropoffs_add_from_db": "Add from DB",
         "dropoffs_none": "Added dropoffs: None",
         "dropoffs_added": "Added dropoffs",
         "max_capacity": "Max bags\n(240L):",
@@ -206,8 +220,201 @@ TRANSLATIONS = {
         "fleet_lbl_cap": "Capacity (240L bags):",
         "fleet_btn_add": "Add New Vehicle",
         "fleet_btn_save_changes": "Save Changes",
+        "dropoff_win_title": "Disposal Points DB (Warehouses)",
+        "dropoff_header": "Saved Disposal Points",
+        "dropoff_empty": "No disposal points saved. Add the first one below.",
+        "dropoff_lbl_name": "Warehouse Name:",
+        "dropoff_lbl_addr": "Address:",
+        "dropoff_btn_add": "Add New Warehouse",
+        "dropoff_btn_save_changes": "Save Changes",
+        "dropoff_addr": "Address",
+        "dropoff_select_title": "Select from DB",
     }
 }
+
+
+class DropoffManagerWindow(ctk.CTkToplevel):
+    """Separate window for managing disposal zones / warehouses (Add / Edit / Delete)"""
+
+    def __init__(self, parent_app):
+        super().__init__(parent_app)
+
+        self.parent_app = parent_app
+        lang = self.parent_app.current_lang
+        t = TRANSLATIONS[lang]
+
+        self.title(t["dropoff_win_title"])
+        self.geometry("580x600")
+        self.grab_set()
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+
+        # Header
+        self.lbl_title = ctk.CTkLabel(
+            self,
+            text=t["dropoff_header"],
+            font=ctk.CTkFont(size=18, weight="bold"),
+        )
+        self.lbl_title.grid(row=0, column=0, padx=15, pady=(15, 5))
+
+        # List
+        self.scroll_frame = ctk.CTkScrollableFrame(self)
+        self.scroll_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=5)
+
+        # Form
+        self.form_frame = ctk.CTkFrame(self)
+        self.form_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(5, 15))
+        self.form_frame.grid_columnconfigure(1, weight=1)
+
+        self.lbl_name = ctk.CTkLabel(self.form_frame, text=t["dropoff_lbl_name"])
+        self.lbl_name.grid(row=0, column=0, padx=8, pady=5, sticky="w")
+        self.entry_name = ctk.CTkEntry(
+            self.form_frame, placeholder_text="np. Magazyn Główny Chorzów"
+        )
+        self.entry_name.grid(row=0, column=1, padx=8, pady=5, sticky="ew")
+
+        self.lbl_addr = ctk.CTkLabel(self.form_frame, text=t["dropoff_lbl_addr"])
+        self.lbl_addr.grid(row=1, column=0, padx=8, pady=5, sticky="w")
+        self.entry_addr = ctk.CTkEntry(
+            self.form_frame, placeholder_text="np. ul. Katowicka 5, Chorzów"
+        )
+        self.entry_addr.grid(row=1, column=1, padx=8, pady=5, sticky="ew")
+
+        self.btn_save = ctk.CTkButton(
+            self.form_frame,
+            text=t["dropoff_btn_add"],
+            fg_color="green",
+            hover_color="darkgreen",
+            height=35,
+            command=self.save_dropoff,
+        )
+        self.btn_save.grid(row=2, column=0, columnspan=2, padx=8, pady=10, sticky="ew")
+
+        self.selected_dropoff_id = None
+        self.refresh_list()
+
+    def refresh_list(self):
+        for widget in self.scroll_frame.winfo_children():
+            widget.destroy()
+
+        t = TRANSLATIONS[self.parent_app.current_lang]
+        dropoffs = self.parent_app.saved_dropoffs
+
+        if not dropoffs:
+            ctk.CTkLabel(
+                self.scroll_frame, text=t["dropoff_empty"]
+            ).pack(pady=20)
+            return
+
+        for d_id, d_data in dropoffs.items():
+            card = ctk.CTkFrame(self.scroll_frame)
+            card.pack(fill="x", pady=4, padx=5)
+
+            info_text = f"{d_data['name']}\n📍 {t['dropoff_addr']}: {d_data['address']}"
+            lbl = ctk.CTkLabel(
+                card, text=info_text, justify="left", font=ctk.CTkFont(size=12)
+            )
+            lbl.pack(side="left", padx=10, pady=8)
+
+            btn_del = ctk.CTkButton(
+                card,
+                text=t["fleet_del"],
+                width=55,
+                fg_color="#EA4335",
+                hover_color="#B31412",
+                command=lambda id_to_del=d_id: self.delete_dropoff(id_to_del),
+            )
+            btn_del.pack(side="right", padx=5)
+
+            btn_edit = ctk.CTkButton(
+                card,
+                text=t["fleet_edit"],
+                width=55,
+                fg_color="#3B82F6",
+                hover_color="#1D4ED8",
+                command=lambda id_to_edit=d_id: self.load_to_edit(id_to_edit),
+            )
+            btn_edit.pack(side="right", padx=2)
+
+    def load_to_edit(self, d_id):
+        d = self.parent_app.saved_dropoffs.get(d_id)
+        if not d:
+            return
+        t = TRANSLATIONS[self.parent_app.current_lang]
+        self.selected_dropoff_id = d_id
+        self.entry_name.delete(0, "end")
+        self.entry_name.insert(0, d["name"])
+
+        self.entry_addr.delete(0, "end")
+        self.entry_addr.insert(0, d["address"])
+
+        self.btn_save.configure(
+            text=t["dropoff_btn_save_changes"], fg_color="#EAB308"
+        )
+
+    def save_dropoff(self):
+        name = self.entry_name.get().strip()
+        addr = self.entry_addr.get().strip()
+
+        if not name or not addr:
+            return
+
+        self.btn_save.configure(state="disabled", text="Geokodowanie...")
+        threading.Thread(target=self._process_save_dropoff, args=(name, addr), daemon=True).start()
+
+    def _process_save_dropoff(self, name, addr):
+        t = TRANSLATIONS[self.parent_app.current_lang]
+        cleaned_addr = self.parent_app.clean_address(addr)
+        lat, lon = None, None
+
+        # If editing and the address hasn't changed, keep the coordinates
+        if self.selected_dropoff_id:
+            old = self.parent_app.saved_dropoffs.get(self.selected_dropoff_id, {})
+            if old.get("address") == addr and "lat" in old and "lon" in old:
+                lat, lon = old["lat"], old["lon"]
+
+        if lat is None or lon is None:
+            try:
+                loc = self.parent_app.geolocator.geocode(f"{cleaned_addr}, Polska", timeout=10)
+                if loc:
+                    lat, lon = loc.latitude, loc.longitude
+            except Exception:
+                pass
+
+        def on_done():
+            if lat is None or lon is None:
+                messagebox.showerror(t["dropoff_win_title"], t["status_dropoff_not_found"], parent=self)
+                self.btn_save.configure(state="normal", text=t["dropoff_btn_add"])
+                return
+
+            if self.selected_dropoff_id:
+                d_id = self.selected_dropoff_id
+            else:
+                d_id = str(int(time.time() * 1000))
+
+            self.parent_app.saved_dropoffs[d_id] = {
+                "name": name,
+                "address": addr,
+                "lat": lat,
+                "lon": lon,
+            }
+            self.parent_app.save_dropoffs_to_file()
+            self.selected_dropoff_id = None
+
+            self.entry_name.delete(0, "end")
+            self.entry_addr.delete(0, "end")
+            self.btn_save.configure(text=t["dropoff_btn_add"], fg_color="green", state="normal")
+            self.refresh_list()
+
+        self.after(0, on_done)
+
+    def delete_dropoff(self, d_id):
+        if d_id in self.parent_app.saved_dropoffs:
+            del self.parent_app.saved_dropoffs[d_id]
+            self.parent_app.save_dropoffs_to_file()
+            self.refresh_list()
 
 
 class VehicleManagerWindow(ctk.CTkToplevel):
@@ -394,8 +601,11 @@ class RoutePlannerApp(ctk.CTk):
         self.vehicles = {}
         self.load_vehicles_from_file()
 
+        self.saved_dropoffs = {}
+        self.load_dropoffs_from_file()
+
         self.start_point = None  # Base / Depot
-        self.dropoff_points = []  # List of available dropoff zones
+        self.dropoff_points = []  # List of chosen dropoff zones for current route
         self.loaded_points = []  # Reverse vending machines (pickup points)
         self.ordered_points_list = []  # Sorted points after optimization
         self.current_selected_vehicle_str = TRANSLATIONS["pl"]["vehicle_placeholder"]
@@ -514,14 +724,38 @@ class RoutePlannerApp(ctk.CTk):
         )
         self.dropoff_entry.pack(padx=15, pady=2, fill="x")
 
+        # Dropoff buttons row (Add, Add from DB, Manage DB)
+        drop_btn_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        drop_btn_frame.pack(padx=15, pady=(2, 4), fill="x")
+
         self.btn_add_dropoff = ctk.CTkButton(
-            self.sidebar_frame,
+            drop_btn_frame,
             text=TRANSLATIONS["pl"]["add_dropoff"],
             fg_color="#EAB308",
             hover_color="#CA8A04",
             command=self.add_dropoff_point,
         )
-        self.btn_add_dropoff.pack(padx=15, pady=(2, 4))
+        self.btn_add_dropoff.pack(side="left", fill="x", expand=True, padx=(0, 2))
+
+        self.btn_add_saved_dropoff = ctk.CTkButton(
+            drop_btn_frame,
+            text=TRANSLATIONS["pl"]["dropoffs_add_from_db"],
+            width=110,
+            fg_color="#2563EB",
+            hover_color="#1D4ED8",
+            command=self.open_saved_dropoffs_picker,
+        )
+        self.btn_add_saved_dropoff.pack(side="left", padx=2)
+
+        self.btn_manage_dropoffs = ctk.CTkButton(
+            drop_btn_frame,
+            text=TRANSLATIONS["pl"]["dropoffs_mgr_btn"],
+            width=65,
+            fg_color="#8E24AA",
+            hover_color="#6A1B9A",
+            command=self.open_dropoff_manager,
+        )
+        self.btn_manage_dropoffs.pack(side="right", padx=(2, 0))
 
         self.dropoff_list_label = ctk.CTkLabel(
             self.sidebar_frame,
@@ -673,6 +907,8 @@ class RoutePlannerApp(ctk.CTk):
         self.dropoff_label.configure(text=t["dropoff_points"])
         self.dropoff_entry.configure(placeholder_text=t["dropoff_placeholder"])
         self.btn_add_dropoff.configure(text=t["add_dropoff"])
+        self.btn_add_saved_dropoff.configure(text=t["dropoffs_add_from_db"])
+        self.btn_manage_dropoffs.configure(text=t["dropoffs_mgr_btn"])
         self.capacity_label.configure(text=t["max_capacity"])
         self.start_time_label.configure(text=t["start_time"])
         self.stop_time_label.configure(text=t["stop_time"])
@@ -683,7 +919,6 @@ class RoutePlannerApp(ctk.CTk):
         self.btn_open_gmaps.configure(text=t["open_gmaps"])
         self.btn_export.configure(text=t["export_txt"])
 
-        # Update default status and empty route box if route is not generated yet
         if not self.ordered_points_list:
             self.update_status(t["status_ready"], "gray")
             self.route_textbox.configure(state="normal")
@@ -699,7 +934,6 @@ class RoutePlannerApp(ctk.CTk):
 
         self.update_vehicle_dropdown()
 
-        # Update map markers to new language
         if self.start_point:
             if self.start_marker:
                 self.map_widget.delete(self.start_marker)
@@ -716,6 +950,7 @@ class RoutePlannerApp(ctk.CTk):
                     pt["lat"], pt["lon"], text=f"{pt['name']} [{bags_desc}]"
                 )
 
+    # Vehicles database
     def load_vehicles_from_file(self):
         if os.path.exists(VEHICLES_FILE):
             try:
@@ -808,6 +1043,86 @@ class RoutePlannerApp(ctk.CTk):
     def open_vehicle_manager(self):
         VehicleManagerWindow(self)
 
+    # Dropoffs database
+    def load_dropoffs_from_file(self):
+        if os.path.exists(DROPOFFS_FILE):
+            try:
+                with open(DROPOFFS_FILE, "r", encoding="utf-8") as f:
+                    self.saved_dropoffs = json.load(f)
+            except Exception:
+                self.saved_dropoffs = {}
+        else:
+            self.saved_dropoffs = {}
+            try:
+                with open(DROPOFFS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(self.saved_dropoffs, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+
+    def save_dropoffs_to_file(self):
+        try:
+            with open(DROPOFFS_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.saved_dropoffs, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def open_dropoff_manager(self):
+        DropoffManagerWindow(self)
+
+    def open_saved_dropoffs_picker(self):
+        t = TRANSLATIONS[self.current_lang]
+        if not self.saved_dropoffs:
+            messagebox.showinfo(t["dropoffs_mgr_btn"], t["dropoff_empty"], parent=self)
+            return
+
+        picker_win = ctk.CTkToplevel(self)
+        picker_win.title(t["dropoff_select_title"])
+        picker_win.geometry("450x380")
+        picker_win.grab_set()
+
+        lbl = ctk.CTkLabel(picker_win, text=t["dropoff_header"], font=ctk.CTkFont(size=15, weight="bold"))
+        lbl.pack(pady=10)
+
+        scroll = ctk.CTkScrollableFrame(picker_win)
+        scroll.pack(fill="both", expand=True, padx=10, pady=5)
+
+        for d_id, d_data in self.saved_dropoffs.items():
+            card = ctk.CTkFrame(scroll)
+            card.pack(fill="x", pady=3, padx=2)
+
+            info = f"{d_data['name']}\n📍 {d_data['address']}"
+            ctk.CTkLabel(card, text=info, justify="left", font=ctk.CTkFont(size=12)).pack(side="left", padx=8, pady=5)
+
+            def add_and_close(saved_pt=d_data):
+                self.add_dropoff_point_direct(saved_pt["name"], saved_pt["address"], saved_pt["lat"], saved_pt["lon"])
+                picker_win.destroy()
+
+            btn = ctk.CTkButton(card, text="➕", width=40, fg_color="green", hover_color="darkgreen", command=add_and_close)
+            btn.pack(side="right", padx=5)
+
+    def add_dropoff_point_direct(self, name, address, lat, lon):
+        t = TRANSLATIONS[self.current_lang]
+        drop_pt = {
+            "name": f"{name} ({address})",
+            "lat": lat,
+            "lon": lon,
+            "bags": 0,
+        }
+        self.dropoff_points.append(drop_pt)
+
+        self.map_widget.set_marker(
+            drop_pt["lat"],
+            drop_pt["lon"],
+            text=f"{t['dropoff_tag']}: {drop_pt['name']}",
+        )
+        names = [d["name"] for d in self.dropoff_points]
+        self.dropoff_list_label.configure(
+            text=f"{t['dropoffs_added']} ({len(names)}):\n" + ", ".join(names),
+            text_color="cyan",
+        )
+        self.update_status(t["status_dropoff_added"], "cyan")
+
+    # General logic
     def update_status(self, text, color="white"):
         self.after(
             0, lambda: self.status_label.configure(text=text, text_color=color)
